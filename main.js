@@ -1,312 +1,221 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import nipplejs from 'nipplejs';
 
 // 1. Scene & Camera Setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x111116);
+scene.background = new THREE.Color(0x111111);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 1.7, 0);
-scene.add(camera);
+camera.position.set(0, 1.6, 0); // ارتفاع العين الإفتراضي
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// 2. Audio Setup
+// 2. Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+dirLight.position.set(5, 10, 7);
+dirLight.castShadow = true;
+scene.add(dirLight);
+
+// 3. Audio Setup
 const listener = new THREE.AudioListener();
 camera.add(listener);
 
 const audioLoader = new THREE.AudioLoader();
-const stepSounds = [];
-const doorSound = new THREE.Audio(listener);
-const switchSound = new THREE.Audio(listener);
-const jumpSound = new THREE.Audio(listener);
+const soundStep1 = new THREE.Audio(listener);
+const soundStep2 = new THREE.Audio(listener);
+const soundDoor = new THREE.Audio(listener);
+const soundSwitch = new THREE.Audio(listener);
+const soundHuh = new THREE.Audio(listener);
 
-audioLoader.load('./step1.mp3', (b) => { const s = new THREE.Audio(listener); s.setBuffer(b); s.setVolume(0.35); stepSounds.push(s); });
-audioLoader.load('./step2.mp3', (b) => { const s = new THREE.Audio(listener); s.setBuffer(b); s.setVolume(0.35); stepSounds.push(s); });
-audioLoader.load('./door.mp3', (b) => { doorSound.setBuffer(b); doorSound.setVolume(0.6); });
-audioLoader.load('./switch.mp3', (b) => { switchSound.setBuffer(b); switchSound.setVolume(0.5); });
-audioLoader.load('./huh.mp3', (b) => { jumpSound.setBuffer(b); jumpSound.setVolume(0.5); });
+audioLoader.load('/step1.mp3', (b) => soundStep1.setBuffer(b));
+audioLoader.load('/step2.mp3', (b) => soundStep2.setBuffer(b));
+audioLoader.load('/door.mp3', (b) => soundDoor.setBuffer(b));
+audioLoader.load('/switch.mp3', (b) => soundSwitch.setBuffer(b));
+audioLoader.load('/huh.mp3', (b) => soundHuh.setBuffer(b));
 
-let stepTimer = 0;
-const stepIntervalBase = 0.45;
+// 4. Load Compressed 3D Model (Draco + GLTF)
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
-// 3. Lighting Setup
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
-scene.add(ambientLight);
+const loader = new GLTFLoader();
+loader.setDRACOLoader(dracoLoader);
 
-const roomLight = new THREE.PointLight(0xffe0b2, 5, 10);
-roomLight.position.set(0, 2.3, 0);
-roomLight.castShadow = true;
-scene.add(roomLight);
+loader.load(
+    '/room.glb',
+    (gltf) => {
+        const model = gltf.scene;
+        model.traverse((child) => {
+            if (child.isMesh) child.castShadow = child.receiveShadow = true;
+        });
+        scene.add(model);
+        console.log('3D Room Loaded Successfully!');
+    },
+    undefined,
+    (error) => {
+        console.error('Error loading 3D model:', error);
+    }
+);
 
-let isLightOn = true;
-
-// 4. Pointer Lock Controls (PC) & Touch Orbit (Mobile)
+// 5. Controls Logic (PC & Mobile)
 const controls = new PointerLockControls(camera, document.body);
 
-const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+// Desktop PointerLock Trigger
+document.addEventListener('click', () => {
+    if (!isMobile() && !controls.isLocked) {
+        controls.lock();
+    }
+});
 
-if (!isMobile) {
-    document.addEventListener('click', () => {
-        if (!controls.isLocked) controls.lock();
+// Movement State Variables
+const moveState = { forward: 0, right: 0 };
+let isRunning = false;
+let isCrouching = false;
+let velocityY = 0;
+let isGrounded = true;
+const gravity = -20;
+const normalHeight = 1.6;
+const crouchHeight = 0.9;
+
+// PC Keyboard Listeners
+document.addEventListener('keydown', (e) => {
+    switch (e.code) {
+        case 'KeyW': moveState.forward = 1; break;
+        case 'KeyS': moveState.forward = -1; break;
+        case 'KeyA': moveState.right = -1; break;
+        case 'KeyD': moveState.right = 1; break;
+        case 'ShiftLeft': isRunning = true; break;
+        case 'KeyC': toggleCrouch(); break;
+        case 'Space': jump(); break;
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    switch (e.code) {
+        case 'KeyW': case 'KeyS': moveState.forward = 0; break;
+        case 'KeyA': case 'KeyD': moveState.right = 0; break;
+        case 'ShiftLeft': isRunning = false; break;
+    }
+});
+
+// Mobile Joystick & Touch Controls Setup
+function isMobile() {
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+}
+
+if (isMobile()) {
+    // Joystick for Movement
+    const joystickZone = document.createElement('div');
+    joystickZone.id = 'joystick-zone';
+    joystickZone.style.cssText = 'position: absolute; bottom: 30px; left: 30px; width: 120px; height: 120px; z-index: 10;';
+    document.body.appendChild(joystickZone);
+
+    const manager = nipplejs.create({
+        zone: joystickZone,
+        mode: 'static',
+        position: { left: '60px', bottom: '60px' },
+        color: 'white'
     });
-} else {
-    // إخفاء الأزرار لو المستخدم على الكمبيوتر
-    let touchStartX = 0, touchStartY = 0;
-    const lookSpeed = 0.003;
 
-    window.addEventListener('touchstart', (e) => {
+    manager.on('move', (evt, data) => {
+        if (data.vector) {
+            moveState.forward = data.vector.y;
+            moveState.right = data.vector.x;
+        }
+    });
+
+    manager.on('end', () => {
+        moveState.forward = 0;
+        moveState.right = 0;
+    });
+
+    // Touch Rotation Control (Right Side of Screen)
+    let touchStartX = 0, touchStartY = 0;
+    document.addEventListener('touchstart', (e) => {
         if (e.touches[0].clientX > window.innerWidth / 2) {
             touchStartX = e.touches[0].clientX;
             touchStartY = e.touches[0].clientY;
         }
     });
 
-    window.addEventListener('touchmove', (e) => {
-        for (let touch of e.touches) {
-            if (touch.clientX > window.innerWidth / 2) {
-                const deltaX = touch.clientX - touchStartX;
-                const deltaY = touch.clientY - touchStartY;
+    document.addEventListener('touchmove', (e) => {
+        if (e.touches[0].clientX > window.innerWidth / 2) {
+            const deltaX = e.touches[0].clientX - touchStartX;
+            const deltaY = e.touches[0].clientY - touchStartY;
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
 
-                camera.rotation.y -= deltaX * lookSpeed;
-                camera.rotation.x -= deltaY * lookSpeed;
-                camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
-
-                touchStartX = touch.clientX;
-                touchStartY = touch.clientY;
-            }
+            camera.rotation.y -= deltaX * 0.003;
+            camera.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, camera.rotation.x - deltaY * 0.003));
         }
     });
 }
 
-// 5. Physics & Movement States
-const moveState = { forward: false, backward: false, left: false, right: false, run: false, crouch: false };
-let joystickVector = { x: 0, y: 0 };
+// Action Helpers
+function jump() {
+    if (isGrounded) {
+        velocityY = 7;
+        isGrounded = false;
+    }
+}
 
-const normalHeight = 1.7;
-const crouchHeight = 1.0;
-let targetCameraHeight = normalHeight;
+function toggleCrouch() {
+    isCrouching = !isCrouching;
+    camera.position.y = isCrouching ? crouchHeight : normalHeight;
+}
 
-let velocityY = 0;
-const gravity = -20;
-const jumpForce = 7;
-let isGrounded = true;
-
-const baseSpeed = 3.5;
+// 6. Game Loop & Physics Update
 const clock = new THREE.Clock();
 
-// Keyboard Listeners (PC)
-document.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyW') moveState.forward = true;
-    if (e.code === 'KeyS') moveState.backward = true;
-    if (e.code === 'KeyA') moveState.left = true;
-    if (e.code === 'KeyD') moveState.right = true;
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') moveState.run = true;
-    if (e.code === 'ControlLeft' || e.code === 'ControlRight') moveState.crouch = true;
-
-    if (e.code === 'Space' && isGrounded && !moveState.crouch) {
-        triggerJump();
-    }
-});
-
-document.addEventListener('keyup', (e) => {
-    if (e.code === 'KeyW') moveState.forward = false;
-    if (e.code === 'KeyS') moveState.backward = false;
-    if (e.code === 'KeyA') moveState.left = false;
-    if (e.code === 'KeyD') moveState.right = false;
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') moveState.run = false;
-    if (e.code === 'ControlLeft' || e.code === 'ControlRight') moveState.crouch = false;
-});
-
-function triggerJump() {
-    if (isGrounded && !moveState.crouch) {
-        velocityY = jumpForce;
-        isGrounded = false;
-        if (jumpSound.buffer) {
-            if (jumpSound.isPlaying) jumpSound.stop();
-            jumpSound.play();
-        }
-    }
-}
-
-// Mobile Touch Controls & Joystick Initialization
-if (typeof nipplejs !== 'undefined') {
-    const joystick = nipplejs.create({
-        zone: document.getElementById('joystick-zone'),
-        mode: 'static',
-        position: { left: '60px', bottom: '60px' },
-        color: 'white'
-    });
-
-    joystick.on('move', (evt, data) => {
-        if (data.vector) {
-            joystickVector.x = data.vector.x;
-            joystickVector.y = data.vector.y;
-        }
-    });
-
-    joystick.on('end', () => {
-        joystickVector.x = 0;
-        joystickVector.y = 0;
-    });
-
-    document.getElementById('btn-jump').addEventListener('touchstart', (e) => { e.preventDefault(); triggerJump(); });
-    document.getElementById('btn-run').addEventListener('touchstart', (e) => { e.preventDefault(); moveState.run = !moveState.run; });
-    document.getElementById('btn-crouch').addEventListener('touchstart', (e) => { e.preventDefault(); moveState.crouch = !moveState.crouch; });
-}
-
-// 6. Load 3D Model
-let doorObject = null;
-let switchObject = null;
-let isDoorOpen = false;
-let targetDoorRotation = 0;
-
-const loader = new GLTFLoader();
-loader.load('./room.glb', (gltf) => {
-    const roomModel = gltf.scene;
-    scene.add(roomModel);
-
-    roomModel.traverse((child) => {
-        if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-        }
-        if (child.name === 'Door') doorObject = child;
-        if (child.name === 'LightSwitch') switchObject = child;
-    });
-});
-
-// 7. Raycaster for Interaction (Touch & Mouse Click)
-const raycaster = new THREE.Raycaster();
-const centerVector = new THREE.Vector2(0, 0);
-
-function handleInteraction() {
-    raycaster.setFromCamera(centerVector, camera);
-    const intersects = raycaster.intersectObjects(scene.children, true);
-
-    if (intersects.length > 0) {
-        const hitObject = intersects[0].object;
-
-        if (doorObject && (hitObject === doorObject || hitObject.parent === doorObject)) {
-            isDoorOpen = !isDoorOpen;
-            targetDoorRotation = isDoorOpen ? Math.PI / 2 : 0;
-            if (doorSound.buffer) { if (doorSound.isPlaying) doorSound.stop(); doorSound.play(); }
-        }
-
-        if (switchObject && (hitObject === switchObject || hitObject.parent === switchObject)) {
-            isLightOn = !isLightOn;
-            roomLight.intensity = isLightOn ? 5 : 0;
-            if (switchSound.buffer) { if (switchSound.isPlaying) switchSound.stop(); switchSound.play(); }
-        }
-    }
-}
-
-document.addEventListener('mousedown', (e) => {
-    if (e.button === 0 && (controls.isLocked || isMobile)) handleInteraction();
-});
-
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// 8. Dynamic Boundary System
-const roomBounds = { minX: -2.5, maxX: 2.5, minZ: -2.5, maxZ: 2.5 };
-const doorGap = { minZ: -1.2, maxZ: 0.1 };
-const outsideBounds = { minX: 2.5, maxX: 20.0, minZ: -15.0, maxZ: 15.0 };
-
-// 9. Main Animation Loop
 function animate() {
     requestAnimationFrame(animate);
-
     const delta = clock.getDelta();
 
-    if (controls.isLocked || isMobile) {
-        let currentSpeed = baseSpeed;
-        if (moveState.run && !moveState.crouch) currentSpeed = baseSpeed * 1.8;
-        else if (moveState.crouch) currentSpeed = baseSpeed * 0.5;
+    // Movement Calculations
+    const speed = (isRunning ? 6 : 3) * (isCrouching ? 0.5 : 1);
+    const moveVector = new THREE.Vector3();
+    
+    // Direction relative to camera view
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    forward.y = 0;
+    forward.normalize();
 
-        const prevPos = camera.position.clone();
-        
-        // حساب حركة الموبايل بالأنالوج + الكيبورد
-        const moveForwardVal = (moveState.forward ? 1 : 0) - (moveState.backward ? 1 : 0) + joystickVector.y;
-        const moveSideVal = (moveState.right ? 1 : 0) - (moveState.left ? 1 : 0) + joystickVector.x;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    right.y = 0;
+    right.normalize();
 
-        const isMoving = (moveForwardVal !== 0 || moveSideVal !== 0) && isGrounded;
+    moveVector.addScaledVector(forward, moveState.forward * speed * delta);
+    moveVector.addScaledVector(right, moveState.right * speed * delta);
+    camera.position.add(moveVector);
 
-        // تطبيق اتجاه الحركة بالنسبة للكاميرا
-        if (moveForwardVal !== 0) controls.moveForward(moveForwardVal * currentSpeed * delta);
-        if (moveSideVal !== 0) controls.moveRight(moveSideVal * currentSpeed * delta);
+    // Gravity / Jumping Mechanics
+    velocityY += gravity * delta;
+    camera.position.y += velocityY * delta;
 
-        // صوت الخطوات
-        if (isMoving) {
-            let currentInterval = stepIntervalBase;
-            if (moveState.run) currentInterval = stepIntervalBase * 0.6;
-            if (moveState.crouch) currentInterval = stepIntervalBase * 1.4;
-
-            stepTimer += delta;
-            if (stepTimer >= currentInterval) {
-                if (stepSounds.length > 0) {
-                    const randomStep = stepSounds[Math.floor(Math.random() * stepSounds.length)];
-                    if (randomStep.isPlaying) randomStep.stop();
-                    randomStep.play();
-                }
-                stepTimer = 0;
-            }
-        } else {
-            stepTimer = stepIntervalBase;
-        }
-
-        const newPos = camera.position;
-
-        // الحدود التصادمية
-        if (prevPos.x <= roomBounds.maxX) {
-            const isExitingDoor = isDoorOpen && prevPos.z >= doorGap.minZ && prevPos.z <= doorGap.maxZ && newPos.x > roomBounds.maxX;
-            if (isExitingDoor) {
-                newPos.x = Math.min(outsideBounds.maxX, newPos.x);
-                newPos.z = Math.max(outsideBounds.minZ, Math.min(outsideBounds.maxZ, newPos.z));
-            } else {
-                newPos.x = Math.max(roomBounds.minX, Math.min(roomBounds.maxX, newPos.x));
-                newPos.z = Math.max(roomBounds.minZ, Math.min(roomBounds.maxZ, newPos.z));
-            }
-        } else {
-            const isEnteringDoor = isDoorOpen && newPos.z >= doorGap.minZ && newPos.z <= doorGap.maxZ && newPos.x <= roomBounds.maxX;
-            if (isEnteringDoor) {
-                newPos.x = Math.max(roomBounds.minX, newPos.x);
-                newPos.z = Math.max(roomBounds.minZ, Math.min(roomBounds.maxZ, newPos.z));
-            } else {
-                newPos.x = Math.max(roomBounds.maxX, Math.min(outsideBounds.maxX, newPos.x));
-                newPos.z = Math.max(outsideBounds.minZ, Math.min(outsideBounds.maxZ, newPos.z));
-            }
-        }
-
-        // فيزياء القفز والارتفاع
-        targetCameraHeight = moveState.crouch ? crouchHeight : normalHeight;
-
-        if (!isGrounded) {
-            velocityY += gravity * delta;
-            camera.position.y += velocityY * delta;
-
-            if (camera.position.y <= targetCameraHeight) {
-                camera.position.y = targetCameraHeight;
-                velocityY = 0;
-                isGrounded = true;
-            }
-        } else {
-            camera.position.y += (targetCameraHeight - camera.position.y) * 0.15;
-        }
-    }
-
-    if (doorObject) {
-        doorObject.rotation.y += (targetDoorRotation - doorObject.rotation.y) * 0.1;
+    const currentBaseHeight = isCrouching ? crouchHeight : normalHeight;
+    if (camera.position.y <= currentBaseHeight) {
+        camera.position.y = currentBaseHeight;
+        velocityY = 0;
+        isGrounded = true;
     }
 
     renderer.render(scene, camera);
 }
 
 animate();
+
+// 7. Window Resize
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
