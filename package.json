@@ -1,0 +1,12 @@
+{
+  "name": "my-three-game",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "three": "^0.170.0",
+    "vite": "^5.0.0"
+  }
+}

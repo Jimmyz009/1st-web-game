@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Web Experience</title>
+    <style>
+        body { margin: 0; overflow: hidden; touch-action: none; }
+        
+        /* أزرار التحكم للموبايل */
+        .mobile-ui {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .btn-touch {
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            user-select: none;
+            backdrop-filter: blur(4px);
+        }
+
+        #joystick-zone {
+            position: absolute;
+            bottom: 40px;
+            left: 20px;
+            width: 120px;
+            height: 120px;
+            z-index: 10;
+        }
+    </style>
+    <!-- مكتبة الجوي ستيك للموبايل -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+</head>
+<body>
+    <div id="joystick-zone"></div>
+    
+    <div class="mobile-ui">
+        <button id="btn-jump" class="btn-touch">JUMP</button>
+        <button id="btn-run" class="btn-touch">RUN</button>
+        <button id="btn-crouch" class="btn-touch">CROUCH</button>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+</body>
+</html>
