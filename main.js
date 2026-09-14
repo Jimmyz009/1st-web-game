@@ -6,10 +6,11 @@ import nipplejs from 'nipplejs';
 
 // 1. Scene & Camera Setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x111111);
+scene.background = new THREE.Color(0x1a1a1a);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 1.6, 0); // ارتفاع العين الإفتراضي
+// ارتفاع عين الإنسان الطبيعي (1.7 متر)
+camera.position.set(0, 1.7, 0); 
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -18,32 +19,37 @@ renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
 // 2. Lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
 scene.add(ambientLight);
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
 dirLight.position.set(5, 10, 7);
 dirLight.castShadow = true;
 scene.add(dirLight);
 
-// 3. Audio Setup
+// 3. Audio Setup (مضبوط للعمل فوراً عند اللمس)
 const listener = new THREE.AudioListener();
 camera.add(listener);
 
 const audioLoader = new THREE.AudioLoader();
 const soundStep1 = new THREE.Audio(listener);
 const soundStep2 = new THREE.Audio(listener);
-const soundDoor = new THREE.Audio(listener);
-const soundSwitch = new THREE.Audio(listener);
-const soundHuh = new THREE.Audio(listener);
 
-audioLoader.load('/step1.mp3', (b) => soundStep1.setBuffer(b));
-audioLoader.load('/step2.mp3', (b) => soundStep2.setBuffer(b));
-audioLoader.load('/door.mp3', (b) => soundDoor.setBuffer(b));
-audioLoader.load('/switch.mp3', (b) => soundSwitch.setBuffer(b));
-audioLoader.load('/huh.mp3', (b) => soundHuh.setBuffer(b));
+// تفعيل الـ Audio Context عند أول ضغطة/لمسة لشاشة الموبايل
+function unlockAudio() {
+    if (listener.context.state === 'suspended') {
+        listener.context.resume();
+    }
+    window.removeEventListener('click', unlockAudio);
+    window.removeEventListener('touchstart', unlockAudio);
+}
+window.addEventListener('click', unlockAudio);
+window.addEventListener('touchstart', unlockAudio);
 
-// 4. Load Compressed 3D Model (Draco + GLTF)
+audioLoader.load('./step1.mp3', (b) => soundStep1.setBuffer(b));
+audioLoader.load('./step2.mp3', (b) => soundStep2.setBuffer(b));
+
+// 4. Load Compressed 3D Model
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
@@ -51,27 +57,21 @@ const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 
 loader.load(
-    '/room.glb',
+    './room.glb',
     (gltf) => {
         const model = gltf.scene;
         
-        // --- التعديل هنا: تكبير الموديل ---
-        // جرب تكبره 10 أضعاف (لو لسه سوداء، جرب 50 أو 100)
-        model.scale.set(10, 10, 10); 
-        
-        // تصفير موقع الموديل في نص المشهد
+        // الحجم الطبيعي 100% بدون تكبير مبالغ فيه
+        model.scale.set(1, 1, 1); 
         model.position.set(0, 0, 0); 
-        // ---------------------------------
 
         model.traverse((child) => {
             if (child.isMesh) {
                 child.castShadow = child.receiveShadow = true;
-                // تأكد إن الخامات مش شفافة تماماً (اختياري)
-                if(child.material) child.material.depthWrite = true;
             }
         });
         scene.add(model);
-        console.log('3D Room Loaded and Scaled!');
+        console.log('Room loaded with realistic scale!');
     },
     undefined,
     (error) => {
@@ -79,27 +79,25 @@ loader.load(
     }
 );
 
-// 5. Controls Logic (PC & Mobile)
+// 5. Controls Logic
 const controls = new PointerLockControls(camera, document.body);
 
-// Desktop PointerLock Trigger
 document.addEventListener('click', () => {
     if (!isMobile() && !controls.isLocked) {
         controls.lock();
     }
 });
 
-// Movement State Variables
 const moveState = { forward: 0, right: 0 };
 let isRunning = false;
 let isCrouching = false;
 let velocityY = 0;
 let isGrounded = true;
-const gravity = -20;
-const normalHeight = 1.6;
-const crouchHeight = 0.9;
+const gravity = -18;
+const normalHeight = 1.7; // ارتفاع الوقوف
+const crouchHeight = 0.95; // ارتفاع الانحناء
 
-// PC Keyboard Listeners
+// Keyboard Controls (PC)
 document.addEventListener('keydown', (e) => {
     switch (e.code) {
         case 'KeyW': moveState.forward = 1; break;
@@ -120,13 +118,13 @@ document.addEventListener('keyup', (e) => {
     }
 });
 
-// Mobile Joystick & Touch Controls Setup
+// Mobile Controls Setup
 function isMobile() {
     return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
 }
 
 if (isMobile()) {
-    // Joystick for Movement
+    // Joystick
     const joystickZone = document.createElement('div');
     joystickZone.id = 'joystick-zone';
     joystickZone.style.cssText = 'position: absolute; bottom: 30px; left: 30px; width: 120px; height: 120px; z-index: 10;';
@@ -151,7 +149,7 @@ if (isMobile()) {
         moveState.right = 0;
     });
 
-    // Touch Rotation Control (Right Side of Screen)
+    // Touch Look
     let touchStartX = 0, touchStartY = 0;
     document.addEventListener('touchstart', (e) => {
         if (e.touches[0].clientX > window.innerWidth / 2) {
@@ -173,10 +171,9 @@ if (isMobile()) {
     });
 }
 
-// Action Helpers
 function jump() {
     if (isGrounded) {
-        velocityY = 7;
+        velocityY = 6;
         isGrounded = false;
     }
 }
@@ -186,18 +183,17 @@ function toggleCrouch() {
     camera.position.y = isCrouching ? crouchHeight : normalHeight;
 }
 
-// 6. Game Loop & Physics Update
+// 6. Animation & Sound Loop
 const clock = new THREE.Clock();
+let stepTimer = 0;
 
 function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
-    // Movement Calculations
-    const speed = (isRunning ? 6 : 3) * (isCrouching ? 0.5 : 1);
+    const speed = (isRunning ? 4.5 : 2.5) * (isCrouching ? 0.5 : 1);
     const moveVector = new THREE.Vector3();
     
-    // Direction relative to camera view
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
     forward.y = 0;
     forward.normalize();
@@ -210,7 +206,18 @@ function animate() {
     moveVector.addScaledVector(right, moveState.right * speed * delta);
     camera.position.add(moveVector);
 
-    // Gravity / Jumping Mechanics
+    // Footstep audio logic
+    const isMoving = Math.abs(moveState.forward) > 0.1 || Math.abs(moveState.right) > 0.1;
+    if (isMoving && isGrounded) {
+        stepTimer += delta;
+        const interval = isRunning ? 0.3 : 0.5;
+        if (stepTimer >= interval) {
+            if (soundStep1.buffer && !soundStep1.isPlaying) soundStep1.play();
+            stepTimer = 0;
+        }
+    }
+
+    // Gravity
     velocityY += gravity * delta;
     camera.position.y += velocityY * delta;
 
@@ -226,7 +233,6 @@ function animate() {
 
 animate();
 
-// 7. Window Resize
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
