@@ -54,11 +54,24 @@ loader.load(
     '/room.glb',
     (gltf) => {
         const model = gltf.scene;
+        
+        // --- التعديل هنا: تكبير الموديل ---
+        // جرب تكبره 10 أضعاف (لو لسه سوداء، جرب 50 أو 100)
+        model.scale.set(10, 10, 10); 
+        
+        // تصفير موقع الموديل في نص المشهد
+        model.position.set(0, 0, 0); 
+        // ---------------------------------
+
         model.traverse((child) => {
-            if (child.isMesh) child.castShadow = child.receiveShadow = true;
+            if (child.isMesh) {
+                child.castShadow = child.receiveShadow = true;
+                // تأكد إن الخامات مش شفافة تماماً (اختياري)
+                if(child.material) child.material.depthWrite = true;
+            }
         });
         scene.add(model);
-        console.log('3D Room Loaded Successfully!');
+        console.log('3D Room Loaded and Scaled!');
     },
     undefined,
     (error) => {
