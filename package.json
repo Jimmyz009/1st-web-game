@@ -1,12 +1,18 @@
 {
-  "name": "my-three-game",
-  "version": "1.0.0",
+  "name": "1st-web-game",
+  "private": true,
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "three": "^0.170.0",
+    "three": "^0.160.0",
+    "nipplejs": "^0.10.1"
+  },
+  "devDependencies": {
     "vite": "^5.0.0"
   }
 }
